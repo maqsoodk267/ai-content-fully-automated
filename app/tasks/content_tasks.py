@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from celery import shared_task
 from sqlalchemy.orm import Session
+from typing import Dict, Any
 
 from app.core.database import SessionLocal
 from app.models import Post, User
@@ -73,12 +74,23 @@ def generate_content(self, user_id: int, topic: str, content_type: str,
             })
             raise ValueError(f"Content too similar to existing content (similarity: {dup_check.get('similarity', 0.0)})")
         
+        # Get optimal posting times from BestTimeEngine
+        best_time_engine = get_engine("best_time")
+        optimal_times = {}
+        for platform in platforms:
+            best_time = best_time_engine.predict_best_time(platform, str(user_id))
+            optimal_times[platform] = best_time.get("best_time_local", "09:00")
+        
+        # Get recommended hashtags from HashtagLearningEngine
+        hashtag_engine = get_engine("hashtag_learning")
+        recommended_hashtags = hashtag_engine.recommend_hashtags(tone, primary_platform, 10)
+        
         self.update_state(state='PROCESSING', meta={'progress': 30, 'stage': 'generating_content'})
         
         # Simulate AI content generation (replace with real AI service)
         time.sleep(2)  # Simulate processing time
         
-        # Mock AI generation
+        # Mock AI generation with enhanced data
         generated_data = {
             "script": f"Engaging content about {topic}. "
                      f"This is a {content_type} optimized for {', '.join(platforms)}. "
@@ -89,12 +101,7 @@ def generate_content(self, user_id: int, topic: str, content_type: str,
                 f"{topic} is trending right now",
                 f"Explore the world of {topic}",
             ],
-            "hashtags": [
-                f"#{topic.replace(' ', '')}",
-                "#trending",
-                "#content",
-                "#viral",
-            ],
+            "hashtags": recommended_hashtags,  # Use learned hashtags
             "ctas": [
                 "Follow for more",
                 "Share this",
@@ -104,11 +111,80 @@ def generate_content(self, user_id: int, topic: str, content_type: str,
                 platform: f"{topic} content for {platform}" 
                 for platform in platforms
             },
+            "optimal_posting_times": optimal_times,  # Add optimal times
             "quality_score": random.uniform(75, 95),
             "virality_potential": random.uniform(60, 90),
         }
         
+        # Analyze hooks with SkipAnalysisEngine
+        skip_engine = get_engine("skip_analysis")
+        for hook in generated_data["hooks"]:
+            skip_engine.track_skip(
+                hook_text=hook,
+                category=tone,
+                platform=primary_platform,
+                user_id=str(user_id),
+                skipped=False,  # Assume not skipped for new content
+                engagement_time=30,  # Mock engagement time
+                metadata={"content_type": content_type}
+            )
+        
+        # Moderate content for safety
+        moderation_engine = get_engine("moderation")
+        moderation_result = moderation_engine.moderate_content(
+            content_id=f"post_{user_id}_{int(time.time())}",
+            text=generated_data["script"],
+            image_path=None,  # No image in mock
+        )
+        
+        if not moderation_result.get("overall_safe", True):
+            logger.warning(f"Content flagged by moderation for user {user_id}")
+            self.update_state(state='FAILURE', meta={
+                'error': 'Content flagged by moderation',
+                'moderation_result': moderation_result
+            })
+            raise ValueError(f"Content flagged by moderation: {moderation_result.get('recommended_action', 'review')}")
+        
+        # Check approval status
+        approval_engine = get_engine("approval")
+        approval_result = approval_engine.evaluate_content({
+            "script": generated_data["script"],
+            "quality_score": generated_data["quality_score"],
+            "account_id": str(user_id),
+            "category": tone,
+            "platforms": platforms,
+            "total_posts": 50,  # Mock data
+            "approved_posts": 45,
+            "avg_engagement_rate": 0.05,
+        })
+        
+        if approval_result.get("decision") == "reject":
+            logger.warning(f"Content rejected by approval engine for user {user_id}")
+            self.update_state(state='FAILURE', meta={
+                'error': 'Content rejected by approval system',
+                'trust_score': approval_result.get('trust_score'),
+                'reasoning': approval_result.get('reasoning')
+            })
+            raise ValueError(f"Content rejected by approval system: {approval_result.get('reasoning', '')}")
+        
         self.update_state(state='PROCESSING', meta={'progress': 70, 'stage': 'saving_to_db'})
+        
+        # Track API cost for content generation
+        cost_engine = get_engine("cost")
+        cost_engine.track_api_call(
+            user_id=str(user_id),
+            api_name="content_generation",
+            model="mock_ai_model",  # Replace with actual model
+            input_tokens=len(generated_data["script"].split()),  # Rough estimate
+            output_tokens=len(generated_data["script"].split()),
+            cost_usd=0.02,  # Mock cost
+            metadata={
+                "topic": topic,
+                "content_type": content_type,
+                "tone": tone,
+                "platforms": platforms,
+            }
+        )
         
         # Save to database
         post = Post(
@@ -127,6 +203,8 @@ def generate_content(self, user_id: int, topic: str, content_type: str,
                 "tone": tone,
                 "language": language,
                 "target_platforms": platforms,
+                "optimal_posting_times": generated_data["optimal_posting_times"],
+                "recommended_hashtags": generated_data["hashtags"],
                 "generated_at": datetime.utcnow().isoformat(),
             }
         )

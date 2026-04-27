@@ -93,6 +93,7 @@ def _bootstrap() -> None:
         EmotionalResonanceEngine, AttentionOptimizerEngine, VisualEnhancementEngine,
         ABTestingEngine, AntiDuplicationEngine, HashtagLearningEngine,
         BestTimeEngine, SkipAnalysisEngine, ContentFreshnessEngine, ContentDecayEngine,
+        ApprovalEngine, ModerationEngine, CostEngine, ResourceManager,
         ContentBucketsEngine, SeriesBuilderEngine, PlatformPsychologyEngine,
         CommentCTAEngine, HumanizedContentEngine, CategoryRouterEngine, CompetitorEngine,
         AccountManager, HumanMimicryEngine, ShadowbanDetectionEngine,
