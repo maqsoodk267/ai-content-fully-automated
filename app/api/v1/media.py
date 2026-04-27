@@ -63,11 +63,15 @@ async def generate_thumbnail(payload: ImageRequest) -> Dict[str, Any]:
 
 class VideoRequest(BaseModel):
     image_paths: List[str] = Field(default_factory=list)
+    clip_paths: List[str] = Field(default_factory=list)
     audio_path: Optional[str] = None
     subtitle_path: Optional[str] = None
     background_video: Optional[str] = None
     out_path: Optional[str] = None
     duration_per_image: float = 3.0
+    transition_duration: float = 0.6
+    zoom_cuts: bool = True
+    speed_ramp: bool = True
     width: int = 1080
     height: int = 1920
     fps: int = 30

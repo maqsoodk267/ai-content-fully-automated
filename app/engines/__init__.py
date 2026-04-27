@@ -61,6 +61,12 @@ def _bootstrap() -> None:
         ContentDecayEngine,
     )
 
+    # System
+    from app.engines.system.approval_engine import ApprovalEngine
+    from app.engines.system.moderation_engine import ModerationEngine
+    from app.engines.system.cost_engine import CostEngine
+    from app.engines.system.resource_manager import ResourceManager
+
     # Strategy
     from app.engines.strategy.strategy_engines import (
         ContentBucketsEngine,

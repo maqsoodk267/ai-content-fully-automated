@@ -49,6 +49,30 @@ def generate_content(self, user_id: int, topic: str, content_type: str,
         
         logger.info(f"Generating content for user {user_id}: {topic}")
         
+        # Check for duplicate content before generation
+        from app.engines import get_engine
+        anti_dup_engine = get_engine("anti_duplication")
+        
+        # Use first platform for duplicate check (can be enhanced later)
+        primary_platform = platforms[0] if platforms else "general"
+        
+        dup_check = anti_dup_engine.check_before_generation(
+            script=f"{topic} {content_type} {tone}",  # Simplified script for check
+            category=tone,
+            platform=primary_platform,
+            account_id=str(user_id),
+            check_window_days=30,
+        )
+        
+        if dup_check.get("is_duplicate", False):
+            logger.warning(f"Duplicate content detected for user {user_id}, topic: {topic}")
+            self.update_state(state='FAILURE', meta={
+                'error': 'Duplicate content detected',
+                'similarity': dup_check.get('similarity', 0.0),
+                'existing_id': dup_check.get('existing_id')
+            })
+            raise ValueError(f"Content too similar to existing content (similarity: {dup_check.get('similarity', 0.0)})")
+        
         self.update_state(state='PROCESSING', meta={'progress': 30, 'stage': 'generating_content'})
         
         # Simulate AI content generation (replace with real AI service)
@@ -292,3 +316,133 @@ def optimize_content(self, post_id: int, optimization_type: str = "seo"):
         
     finally:
         db.close()
+
+
+# ============================================================================
+# Learning Engine Tasks
+# ============================================================================
+
+@shared_task(bind=True, name='app.tasks.content_tasks.update_skip_analysis')
+def update_skip_analysis(self) -> Dict[str, Any]:
+    """
+    Periodic task to update skip analysis patterns and templates.
+    Run daily to analyze accumulated skip data.
+    """
+    try:
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'stage': 'analyzing_patterns'})
+
+        engine = get_engine("skip_analysis")
+        patterns = engine.analyze_patterns()
+
+        self.update_state(state='PROCESSING', meta={'progress': 75, 'stage': 'updating_templates'})
+
+        template_updates = engine.update_templates()
+
+        self.update_state(state='SUCCESS', meta={'progress': 100})
+
+        logger.info("Skip analysis update completed")
+
+        return {
+            "patterns_analyzed": patterns,
+            "templates_updated": template_updates,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Skip analysis update failed: {str(e)}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'error': str(e)})
+        raise
+
+
+@shared_task(bind=True, name='app.tasks.content_tasks.update_best_time_learning')
+def update_best_time_learning(self) -> Dict[str, Any]:
+    """
+    Periodic task to update best time predictions and scheduler.
+    Run daily to incorporate new engagement data.
+    """
+    try:
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'stage': 'updating_scheduler'})
+
+        engine = get_engine("best_time")
+        scheduler_updates = engine.auto_update_scheduler()
+
+        self.update_state(state='SUCCESS', meta={'progress': 100})
+
+        logger.info("Best time learning update completed")
+
+        return {
+            "scheduler_updates": scheduler_updates,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Best time learning update failed: {str(e)}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'error': str(e)})
+        raise
+
+
+@shared_task(bind=True, name='app.tasks.content_tasks.update_hashtag_learning')
+def update_hashtag_learning(self, threshold_engagement: float = 0.5) -> Dict[str, Any]:
+    """
+    Periodic task to clean up underperforming hashtags.
+    Run weekly to maintain hashtag quality.
+    """
+    try:
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'stage': 'cleaning_hashtags'})
+
+        engine = get_engine("hashtag_learning")
+        cleanup_results = engine.drop_poor_hashtags(threshold_engagement)
+
+        self.update_state(state='SUCCESS', meta={'progress': 100})
+
+        logger.info("Hashtag learning cleanup completed")
+
+        return {
+            "cleanup_results": cleanup_results,
+            "threshold_used": threshold_engagement,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Hashtag learning update failed: {str(e)}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'error': str(e)})
+        raise
+
+
+@shared_task(bind=True, name='app.tasks.content_tasks.bulk_update_learning_engines')
+def bulk_update_learning_engines(self) -> Dict[str, Any]:
+    """
+    Bulk update all learning engines.
+    Run as a maintenance task.
+    """
+    results = {}
+
+    try:
+        # Update skip analysis
+        self.update_state(state='PROCESSING', meta={'progress': 25, 'stage': 'updating_skip_analysis'})
+        skip_result = update_skip_analysis()
+        results["skip_analysis"] = skip_result
+
+        # Update best time learning
+        self.update_state(state='PROCESSING', meta={'progress': 50, 'stage': 'updating_best_time'})
+        best_time_result = update_best_time_learning()
+        results["best_time"] = best_time_result
+
+        # Update hashtag learning
+        self.update_state(state='PROCESSING', meta={'progress': 75, 'stage': 'updating_hashtags'})
+        hashtag_result = update_hashtag_learning()
+        results["hashtag_learning"] = hashtag_result
+
+        self.update_state(state='SUCCESS', meta={'progress': 100})
+
+        logger.info("Bulk learning engine update completed")
+
+        return {
+            "results": results,
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Bulk learning engine update failed: {str(e)}", exc_info=True)
+        self.update_state(state='FAILURE', meta={'error': str(e)})
+        raise

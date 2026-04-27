@@ -815,6 +815,294 @@ class Log(Base):
 
 
 # =====================================================================
+# Learning Engine Models
+# =====================================================================
+
+class SkipEvent(Base):
+    """Track viewer skip events for content optimization"""
+    __tablename__ = 'skip_events'
+
+    id = Column(BigInteger, primary_key=True)
+    post_id = Column(BigInteger, ForeignKey('posts.id', ondelete='CASCADE'), nullable=False, index=True)
+    account_id = Column(BigInteger, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Skip Details
+    skip_time_seconds = Column(Float, nullable=False)
+    platform = Column(String(50), nullable=False, index=True)
+    category = Column(String(100), index=True)
+
+    # Context
+    video_duration = Column(Float)  # total video length
+    viewer_count_at_skip = Column(Integer)  # how many viewers left at this point
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_skip_event_post_platform', 'post_id', 'platform'),
+        Index('idx_skip_event_category', 'category'),
+        Index('idx_skip_event_created_at', 'created_at'),
+    )
+
+    # Relationships
+    post = relationship("Post", backref="skip_events")
+    account = relationship("Account", backref="skip_events")
+
+    def __repr__(self):
+        return f"<SkipEvent(id={self.id}, post_id={self.post_id}, skip_time={self.skip_time_seconds}s, platform='{self.platform}')>"
+
+
+class BestTimeMetric(Base):
+    """Store engagement metrics per hour/day for optimal posting times"""
+    __tablename__ = 'best_time_metrics'
+
+    id = Column(BigInteger, primary_key=True)
+    account_id = Column(BigInteger, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False, index=True)
+    user_id = Column(BigInteger, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Time Context
+    platform = Column(String(50), nullable=False, index=True)
+    hour_utc = Column(Integer, nullable=False)  # 0-23
+    day_of_week = Column(Integer)  # 0=Monday, 6=Sunday
+    timezone = Column(String(50), default='UTC')
+
+    # Performance Metrics
+    post_count = Column(Integer, default=0)
+    total_engagement = Column(Float, default=0.0)
+    avg_engagement = Column(Float, default=0.0)
+    total_views = Column(BigInteger, default=0)
+    avg_views = Column(Float, default=0.0)
+
+    # Learning Data
+    engagement_samples = Column(JSONB, default=list)  # list of engagement rates
+    confidence_score = Column(Float, default=0.0)  # based on sample size
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    last_updated = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_best_time_account_platform', 'account_id', 'platform'),
+        Index('idx_best_time_hour', 'hour_utc'),
+        Index('idx_best_time_platform_hour', 'platform', 'hour_utc'),
+        UniqueConstraint('account_id', 'platform', 'hour_utc', name='uq_account_platform_hour'),
+    )
+
+    # Relationships
+    account = relationship("Account", backref="best_time_metrics")
+    user = relationship("User", backref="best_time_metrics")
+
+    def __repr__(self):
+        return f"<BestTimeMetric(account_id={self.account_id}, platform='{self.platform}', hour={self.hour_utc}, avg_engagement={self.avg_engagement})>"
+
+
+class HashtagPerformance(Base):
+    """Track hashtag performance across platforms and categories"""
+    __tablename__ = 'hashtag_performance'
+
+    id = Column(BigInteger, primary_key=True)
+    hashtag = Column(String(200), nullable=False, index=True)
+
+    # Context
+    platform = Column(String(50), nullable=False, index=True)
+    category = Column(String(100), index=True)
+
+    # Performance Metrics
+    usage_count = Column(Integer, default=0)
+    total_impressions = Column(BigInteger, default=0)
+    total_engagement = Column(Float, default=0.0)
+    avg_impressions = Column(Float, default=0.0)
+    avg_engagement = Column(Float, default=0.0)
+
+    # Learning Data
+    impression_samples = Column(JSONB, default=list)  # list of impression counts
+    engagement_samples = Column(JSONB, default=list)  # list of engagement rates
+    performance_score = Column(Float, default=0.0)  # calculated score
+
+    # Status
+    is_active = Column(Boolean, default=True, index=True)
+    last_performance_check = Column(DateTime(timezone=True))
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_hashtag_perf_hashtag_platform', 'hashtag', 'platform'),
+        Index('idx_hashtag_perf_category', 'category'),
+        Index('idx_hashtag_perf_score', 'performance_score'),
+        Index('idx_hashtag_perf_active', 'is_active'),
+        UniqueConstraint('hashtag', 'platform', 'category', name='uq_hashtag_platform_category'),
+    )
+
+    def __repr__(self):
+        return f"<HashtagPerformance(hashtag='{self.hashtag}', platform='{self.platform}', score={self.performance_score})>"
+
+
+class APICall(Base):
+    """Track API calls and their costs for billing and usage monitoring"""
+    __tablename__ = 'api_calls'
+
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    account_id = Column(BigInteger, ForeignKey('accounts.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # API Call Details
+    service = Column(String(100), nullable=False, index=True)  # openai, anthropic, etc.
+    operation = Column(String(100), nullable=False)  # text_generation, image_generation, etc.
+    endpoint = Column(String(255))  # Specific API endpoint called
+
+    # Cost Information
+    cost_usd = Column(Numeric(10, 6), nullable=False, default=0)  # Cost in USD
+    tokens_used = Column(Integer)  # For text models
+    images_generated = Column(Integer)  # For image models
+    audio_duration_seconds = Column(Float)  # For speech synthesis
+
+    # Request/Response Metadata
+    request_size_bytes = Column(Integer)  # Request payload size
+    response_size_bytes = Column(Integer)  # Response payload size
+    processing_time_ms = Column(Integer)  # Time to complete
+
+    # Context
+    content_type = Column(String(50))  # post, asset, analysis, etc.
+    content_id = Column(BigInteger)  # Related content ID
+    platform = Column(String(50))  # Target platform if applicable
+
+    # Status
+    success = Column(Boolean, default=True)
+    error_message = Column(Text)
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_api_call_user_service', 'user_id', 'service'),
+        Index('idx_api_call_created_at', 'created_at'),
+        Index('idx_api_call_service_operation', 'service', 'operation'),
+        Index('idx_api_call_cost', 'cost_usd'),
+    )
+
+    # Relationships
+    user = relationship("User", backref="api_calls")
+    account = relationship("Account", backref="api_calls")
+
+    def __repr__(self):
+        return f"<APICall(id={self.id}, user_id={self.user_id}, service='{self.service}', cost=${self.cost_usd})>"
+
+
+class UserBudget(Base):
+    """User budget limits and usage tracking"""
+    __tablename__ = 'user_budgets'
+
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+
+    # Budget Settings
+    monthly_budget_usd = Column(Numeric(10, 2), nullable=False)
+    daily_budget_usd = Column(Numeric(10, 2))
+
+    # Current Usage (reset periodically)
+    current_month_usage = Column(Numeric(10, 2), default=0)
+    current_day_usage = Column(Numeric(10, 2), default=0)
+
+    # Period Tracking
+    budget_period_start = Column(DateTime(timezone=True), server_default=func.now())
+    last_reset_date = Column(Date, server_default=func.current_date())
+
+    # Alerts
+    alert_threshold_percent = Column(Float, default=80.0)  # Alert at 80% usage
+    alerts_enabled = Column(Boolean, default=True)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_user_budget_user', 'user_id'),
+        UniqueConstraint('user_id', name='uq_user_budget_user'),
+    )
+
+    # Relationships
+    user = relationship("User", backref="budget")
+
+    def __repr__(self):
+        return f"<UserBudget(user_id={self.user_id}, monthly=${self.monthly_budget_usd}, current=${self.current_month_usage})>"
+
+
+class QuarantinedContent(Base):
+    """Content flagged for moderation review"""
+    __tablename__ = 'quarantined_content'
+
+    id = Column(BigInteger, primary_key=True)
+    content_id = Column(String(255), nullable=False, index=True)  # Could be post_id or asset_id
+    content_type = Column(String(50), nullable=False)  # post, asset, etc.
+
+    # Moderation Details
+    quarantine_reason = Column(String(255), nullable=False)
+    severity = Column(String(50), default='medium')  # low, medium, high
+    flagged_by = Column(String(100))  # Engine or user that flagged it
+
+    # Content Preview (for review)
+    content_preview = Column(Text)  # Truncated content text
+    metadata_snapshot = Column(JSONB)  # Content metadata at time of quarantine
+
+    # Review Status
+    reviewed = Column(Boolean, default=False, index=True)
+    reviewer_id = Column(BigInteger, ForeignKey('users.id', ondelete='SET NULL'))
+    review_decision = Column(String(50))  # approve, reject, modify
+    review_notes = Column(Text)
+
+    # Appeal Process
+    appealed = Column(Boolean, default=False)
+    appeal_reason = Column(Text)
+    appeal_resolved = Column(Boolean, default=False)
+
+    # Metadata
+    extra_metadata = Column("metadata", JSONB, default=dict)
+
+    # Temporal
+    quarantined_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    reviewed_at = Column(DateTime(timezone=True))
+    appeal_deadline = Column(DateTime(timezone=True))
+
+    # Indexes
+    __table_args__ = (
+        Index('idx_quarantined_content_type', 'content_type'),
+        Index('idx_quarantined_reviewed', 'reviewed'),
+        Index('idx_quarantined_severity', 'severity'),
+    )
+
+    # Relationships
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+    def __repr__(self):
+        return f"<QuarantinedContent(id={self.id}, content_id='{self.content_id}', reason='{self.quarantine_reason}', reviewed={self.reviewed})>"
+
+
+# =====================================================================
 # Export all models
 # =====================================================================
 
@@ -831,6 +1119,12 @@ __all__ = [
     'Duplicate',
     'Campaign',
     'Log',
+    'SkipEvent',
+    'BestTimeMetric',
+    'HashtagPerformance',
+    'APICall',
+    'UserBudget',
+    'QuarantinedContent',
     'post_hashtags',
     # Enums
     'UserPlan',

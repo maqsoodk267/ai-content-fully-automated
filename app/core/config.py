@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+
+    # Translation services
+    libretranslate_url: Optional[str] = None
+    huggingface_api_url: str = "https://api-inference.huggingface.co"
+    huggingface_api_token: Optional[str] = None
+    translation_cache_ttl_s: int = 86400
+    translation_timeout_libre_s: float = 15.0
+    translation_timeout_hf_s: float = 30.0
     
     # MinIO
     minio_endpoint: str = "localhost:9000"
